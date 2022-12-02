@@ -8,6 +8,10 @@ class Board
     reset
   end
 
+  def reset
+    (1..9).each { |key| @squares[key] = Square.new }
+  end
+
   # rubocop:disable Metrics/AbcSize
   # rubocop:disable Metrics/MethodLength
   def draw
@@ -31,10 +35,6 @@ class Board
     @squares[key].marker = marker
   end
 
-  def unmarked_keys
-    @squares.keys.select { |key| @squares[key].unmarked? }
-  end
-
   def full?
     unmarked_keys.empty?
   end
@@ -42,6 +42,14 @@ class Board
   def someone_won?
     !!winning_marker
   end
+
+  def unmarked_keys
+    @squares.keys.select { |key| @squares[key].unmarked? }
+  end
+
+  def middle_unmarked?
+    @squares[5].unmarked?
+  end  
 
   def winning_marker
     WINNING_LINES.each do |line|
@@ -66,14 +74,6 @@ class Board
     nil
   end
 
-  def middle_unmarked?
-    @squares[5].unmarked?
-  end
-
-  def reset
-    (1..9).each { |key| @squares[key] = Square.new }
-  end
-
   private
 
   def three_identical_markers?(squares)
@@ -92,13 +92,13 @@ class Square
     @marker = marker
   end
 
-  def to_s
-    @marker
-  end
-
   def unmarked?
     @marker == INITIAL_MARKER
   end
+
+  def to_s
+    @marker
+  end  
 end
 
 class Player
@@ -114,8 +114,6 @@ class TTTGame
   COMPUTER_MARKER = '0'
   POINTS_TARGET = 3
 
-  attr_reader :board, :human, :computer
-
   def play
     loop do # series loop
       display_welcome_message
@@ -129,20 +127,24 @@ class TTTGame
 
   private
 
+  attr_reader :board, :human, :computer
+  attr_accessor :human_points, :computer_points, :current_marker, :difficult, :first_to_move
+
   def initialize
     @board = Board.new
     @human = Player.new(HUMAN_MARKER)
     @computer = Player.new(COMPUTER_MARKER)
-    @current_marker = HUMAN_MARKER
     @human_points = 0
     @computer_points = 0
-    @difficult = true
+    @current_marker = nil
+    @difficult = nil
+    @first_to_move = nil
   end
 
   def configure_game
-    @current_marker = human_plays_first? ? HUMAN_MARKER : COMPUTER_MARKER
-    @first_to_move = @current_marker
-    @difficult = difficult_mode?
+    self.first_to_move = human_plays_first? ? HUMAN_MARKER : COMPUTER_MARKER  #reverse this
+    self.current_marker = first_to_move
+    self.difficult = difficult_mode?
     puts "OK. We're ready to begin. Press 'enter' to continue."
     loop do
       gets
@@ -160,76 +162,14 @@ class TTTGame
   end
 
   def do_player_moves
-    loop do # repeat player movees until game is complete
+    loop do # repeat player moves until game is complete
       current_player_moves
       break if board.someone_won? || board.full?
       clear_screen_and_display_board if human_turn?
     end
   end
 
-  def human_plays_first?
-    response = nil
-    loop do
-      puts "** Set First Player **"
-      puts "Would you like to play first? Enter 'y' or 'n'"
-      response = gets.chomp.downcase
-      break if ['y', 'n'].include? response
-      puts "That was not a valid response"
-    end
-    response == 'y'
-  end
-
-  def difficult_mode?
-    response = nil
-    loop do
-      puts "** Set Difficulty **"
-      puts "Would you like to play easy or difficult mode? Enter 'e' or 'd'"
-      response = gets.chomp.downcase
-      break if ['e', 'd'].include? response
-      puts "That was not a valid response"
-    end
-    response == 'd'
-  end
-
-  def display_welcome_message
-    clear
-    puts "Welcome to Tic Tac Toe!"
-    puts ""
-  end
-
-  def display_goodbye_message
-    puts "Thanks for playing Tic Tac Toe! Goodbye"
-    puts ""
-  end
-
-  def clear_screen_and_display_board
-    clear
-    display_board
-  end
-
-  def display_player_marks
-    puts "** Player Marks **"
-    puts "You:      '#{TTTGame::HUMAN_MARKER}'"
-    puts "Computer: '#{TTTGame::COMPUTER_MARKER}'"
-    puts ""
-  end
-
-  def display_score
-    puts "** Series Score **"
-    puts "Human:     #{@human_points}"
-    puts "Computer:  #{@computer_points}"
-    puts ""
-    puts "First player to #{POINTS_TARGET} wins the series"
-    puts ""
-  end
-
-  def display_board
-    display_score
-    display_player_marks
-    board.draw
-    puts ""
-  end
-
+  # SECTION: Move Methods
   def human_moves
     puts "Choose a position to place your marker: #{joinor(board.unmarked_keys)}"
     square = nil
@@ -243,9 +183,9 @@ class TTTGame
   end
 
   def computer_moves
-    key = if @difficult && find_offensive_key
+    key = if difficult && find_offensive_key
             find_offensive_key
-          elsif @difficult && find_defensive_key
+          elsif difficult && find_defensive_key
             find_defensive_key
           elsif board.middle_unmarked?
             5
@@ -266,34 +206,81 @@ class TTTGame
   def current_player_moves
     if human_turn?
       human_moves
-      @current_marker = COMPUTER_MARKER
+      self.current_marker = COMPUTER_MARKER
     else
       computer_moves
-      @current_marker = HUMAN_MARKER
+      self.current_marker = HUMAN_MARKER
     end
   end
 
   def human_turn?
-    @current_marker == HUMAN_MARKER
+    self.current_marker == HUMAN_MARKER
   end
 
+  # SECTION: Game Status Methods
   def update_score
     case board.winning_marker
-    when HUMAN_MARKER then @human_points += 1
-    when COMPUTER_MARKER then @computer_points += 1
+    when HUMAN_MARKER then self.human_points += 1
+    when COMPUTER_MARKER then self.computer_points += 1
     end
   end
 
-  def display_result
-    clear_screen_and_display_board
+  def reset_game
+    board.reset
+    alternate_first_move
+    if series_winner?
+      sleep 2 
+      clear
+    else
+      clear if ready_to_continue?
+    end    
+  end
 
-    puts "** Game Result **"
-    case board.winning_marker
-    when HUMAN_MARKER then puts "You win this game!"
-    when COMPUTER_MARKER then puts "Computer wins this game."
-    else puts "The board is full -- tie game."
+  def alternate_first_move
+    self.first_to_move = first_to_move == HUMAN_MARKER ? COMPUTER_MARKER : HUMAN_MARKER
+    self.current_marker = first_to_move
+  end
+
+  def series_winner?
+    !!detect_series_winner
+  end
+
+  def detect_series_winner
+    if computer_points == POINTS_TARGET
+      COMPUTER_MARKER
+    elsif human_points == POINTS_TARGET
+      HUMAN_MARKER
     end
-    puts ""
+  end
+
+  def reset_points
+    self.human_points = 0
+    self.computer_points = 0
+  end
+
+  # SECTION: User Inut Methods
+  def human_plays_first?
+    response = nil
+    loop do
+      puts "** Set First Player **"
+      puts "Would you like to play first? Enter 'y' or 'n'"
+      response = gets.chomp.downcase
+      break if ['y', 'n', 'yes', 'no'].include? response
+      puts "That was not a valid response"
+    end
+    response == 'y' || response == 'yes'
+  end
+
+  def difficult_mode?
+    response = nil
+    loop do
+      puts "** Set Difficulty **"
+      puts "Would you like to play easy or difficult mode? Enter 'e' or 'd'"
+      response = gets.chomp.downcase[0]
+      break if ['e', 'd', 'easy', 'difficult'].include? response
+      puts "That was not a valid response"
+    end
+    response == 'd' || response == 'difficult'
   end
 
   def play_another_series?
@@ -301,11 +288,11 @@ class TTTGame
     loop do
       puts "** Play again? **"
       puts "Would you like to play another series? Enter 'y' or 'n'"
-      response = gets.chomp.downcase
-      break if ['y', 'n'].include? response
+      response = gets.chomp.downcase[0]
+      break if ['y', 'n', 'yes', 'no'].include? response
       puts "That was not a valid response"
     end
-    response == 'y'
+    response == 'y' || response == 'yes'
   end
 
   def ready_to_continue?
@@ -318,18 +305,79 @@ class TTTGame
     true
   end
 
-  def clear
-    system "clear"
+  # SECTION: Display Methods
+  def display_welcome_message
+    clear
+    puts <<~MSG
+    "Welcome to Tic Tac Toe!"
+
+    MSG
   end
 
-  def reset_game
-    board.reset
-    @current_marker = @first_to_move
-    clear if ready_to_continue?
+  def display_goodbye_message
+    puts <<~MSG
+    Thanks for playing Tic Tac Toe! Goodbye
+
+    MSG
+  end
+
+  def clear_screen_and_display_board
+    clear
+    display_board
+  end
+
+  def display_player_marks
+    puts <<~MSG
+    ** Player Marks **"
+    You:      '#{TTTGame::HUMAN_MARKER}'
+    Computer: '#{TTTGame::COMPUTER_MARKER}'
+
+    MSG
+  end
+
+  def display_score
+    puts <<~MSG
+    ** Series Score **
+    Human:     #{human_points}
+    Computer:  #{computer_points}
+
+    First player to #{POINTS_TARGET} wins the series
+
+    MSG
+  end
+
+  def display_board
+    display_score
+    display_player_marks
+    board.draw
+    puts ""
+  end
+
+  def display_result
+    clear_screen_and_display_board
+
+    header =  "** Game Result **" + "\n"
+    msg = case board.winning_marker
+    when HUMAN_MARKER then "You win this game!"
+    when COMPUTER_MARKER then "Computer wins this game."
+    else  "The board is full -- tie game."
+    end
+    puts header + msg + "\n\n"
+  end
+
+  def display_series_end_message
+    header = "** Series Result **" + "\n"
+    msg = if detect_series_winner == HUMAN_MARKER
+      "You won the series!"
+    else
+      "Computer won the series."
+    end
+    puts header + msg + "\n\n"
+    display_score
   end
 
   def joinor(unmarked_squares, delimeter = ', ', conjunction = 'or')
-    case  unmarked_squares.count
+    case unmarked_squares.count
     when 1 then unmarked_squares.first
     when 2 then "#{unmarked_squares.first} #{conjunction} #{unmarked_squares.last}"
     else
@@ -339,32 +387,8 @@ class TTTGame
     end
   end
 
-  def series_winner?
-    !!detect_series_winner
-  end
-
-  def detect_series_winner
-    if @computer_points == POINTS_TARGET
-      COMPUTER_MARKER
-    elsif @human_points == POINTS_TARGET
-      HUMAN_MARKER
-    end
-  end
-
-  def display_series_end_message
-    puts "** Series Result **"
-    if detect_series_winner == HUMAN_MARKER
-      puts "You won the series!"
-    else
-      puts "Computer won the series."
-    end
-    puts ""
-    display_score
-  end
-
-  def reset_points
-    @human_points = 0
-    @computer_points = 0
+  def clear
+    system "clear"
   end
 end
 
